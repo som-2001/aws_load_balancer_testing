@@ -11,7 +11,7 @@ app.use(
 
 app.get("/", async (req, res) => {
   // Defines GET route for root path
-  res.send("successful!! 🎉")
+  res.send("successful new instance!! 🎉")
 });
 
 app.listen(3001, () => {
