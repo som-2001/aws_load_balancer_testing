@@ -110,20 +110,26 @@ jobs:
         
       - name: Deploy to EC2 Instances
         run: |
-          while IFS= read -r IP; do
-            echo "Deploying to $IP"
-
-            ssh -o StrictHostKeyChecking=no -i pingMe.pem ubuntu@$IP << 'EOF'
-            cd /home/ubuntu/aws_load_balancer_testing
-            git pull origin master
-            npm install
-            pm2 delete node_backend || true
-            pm2 start index.js --name node_backend
-            pm2 save
-            EOF
-
-          done < ec2-ips.txt
-        shell: /usr/bin/bash
+              while IFS= read -r IP; do
+                echo "🚀 Deploying to $IP"
+                
+                ssh -o StrictHostKeyChecking=no -i pingMe.pem ubuntu@$IP << 'EOF'
+                cd /home/ubuntu/aws_load_balancer_testing
+                git pull origin master
+                npm install
+                pm2 delete node_backend || true
+                pm2 start index.js --name node_backend
+                pm2 save
+              EOF
+          
+              done < ec2-ips.txt
+        shell: bash  # ✅ Correct way to define shell
+        env:
+            AWS_DEFAULT_REGION: ${{ secrets.AWS_REGION }}
+            AWS_REGION: ${{ secrets.AWS_REGION }}
+            AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+            AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          
 
       - name: Cleanup SSH Key
         if: always()
