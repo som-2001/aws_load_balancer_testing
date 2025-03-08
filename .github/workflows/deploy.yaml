@@ -1,0 +1,61 @@
+name: Deploy to EC2 ASG
+
+on:
+  push:
+    branches:
+      - master  # Trigger on push to main branch
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Setup AWS CLI
+        run: |
+          sudo apt-get update && sudo apt-get install -y awscli
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Get Running ASG Instances
+        id: get_instances
+        run: |
+          INSTANCES=$(aws autoscaling describe-auto-scaling-groups \
+            --auto-scaling-group-names "${{ secrets.ASG_NAME }}" \
+            --query "AutoScalingGroups[0].Instances[*].InstanceId" \
+            --output text)
+          echo "INSTANCES=${INSTANCES}" >> $GITHUB_ENV
+
+      - name: Get Public IPs of Instances
+        run: |
+          for instance in $INSTANCES; do
+            IP=$(aws ec2 describe-instances --instance-ids $instance \
+              --query "Reservations[0].Instances[0].PublicIpAddress" \
+              --output text)
+
+            if [[ "$IP" == "None" ]]; then
+              echo "Skipping instance $instance as it has no public IP."
+              continue
+            fi
+
+            echo "Deploying to $IP"
+            
+            # SSH and deploy
+            ssh -o StrictHostKeyChecking=no -i pingMe.pem ubuntu@$IP <<EOF
+              cd /home/ubuntu/aws_load_balancer_testing
+              git pull origin main
+              npm install
+              pm2 restart node_backend
+            EOF
+          done
+
+      - name: Cleanup SSH Key
+        if: always()
+        run: rm -f pingMe.pem
