@@ -72,26 +72,42 @@ jobs:
 
       - name: Ensure .ssh Directory & Debug EC2 IPs
         run: |
-            mkdir -p ~/.ssh  # Ensure .ssh directory exists
-            chmod 700 ~/.ssh  # Secure .ssh directory
-            touch ~/.ssh/known_hosts  # Create known_hosts file if missing
-            chmod 600 ~/.ssh/known_hosts  # Set correct permissions
-            
-            # Check if ec2-ips.txt exists and is not empty
+            set -e  # Exit immediately if any command fails
+        
+            # Ensure .ssh directory exists and set correct permissions
+            mkdir -p ~/.ssh
+            chmod 700 ~/.ssh
+        
+            # Ensure known_hosts file exists and set correct permissions
+            touch ~/.ssh/known_hosts
+            chmod 600 ~/.ssh/known_hosts
+        
+            # Debug if ec2-ips.txt exists and is not empty
             if [[ ! -s ec2-ips.txt ]]; then
-              echo "Error: ec2-ips.txt is empty or missing!"
+              echo "❌ Error: ec2-ips.txt is empty or missing!"
               exit 1
             fi
-            
-            # Debug output
-            echo "EC2 Instances IPs Found:"
+        
+            echo "✅ EC2 Instances IPs Found:"
             cat ec2-ips.txt
-            
-            # Add instances to known_hosts
-            while IFS= read -r IP; do
-              echo "Adding $IP to known_hosts"
-              ssh-keyscan -H $IP >> ~/.ssh/known_hosts
+        
+            # Add instances to known_hosts with better error handling
+            while IFS= read -r IP || [[ -n "$IP" ]]; do
+              IP=$(echo "$IP" | tr -d '[:space:]')  # Trim spaces/newlines
+              if [[ -z "$IP" ]]; then
+                continue
+              fi
+        
+              echo "🔹 Adding $IP to known_hosts..."
+              ssh-keyscan -H "$IP" >> ~/.ssh/known_hosts 2>/dev/null || {
+                echo "❌ Error: ssh-keyscan failed for $IP"
+                exit 1
+              }
             done < ec2-ips.txt
+        
+            echo "✅ All IPs added successfully!"
+            ls -la ~/.ssh  # Debug permissions
+        
         
         
 
