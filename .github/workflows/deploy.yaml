@@ -70,14 +70,29 @@ jobs:
           echo "${{ secrets.SSH_PRIVATE_KEY }}" > pingMe.pem
           chmod 600 pingMe.pem
 
-      - name: Add EC2 Host to Known Hosts
+      - name: Ensure .ssh Directory & Debug EC2 IPs
         run: |
             mkdir -p ~/.ssh  # Ensure .ssh directory exists
+            chmod 700 ~/.ssh  # Secure .ssh directory
             touch ~/.ssh/known_hosts  # Create known_hosts file if missing
             chmod 600 ~/.ssh/known_hosts  # Set correct permissions
+            
+            # Check if ec2-ips.txt exists and is not empty
+            if [[ ! -s ec2-ips.txt ]]; then
+              echo "Error: ec2-ips.txt is empty or missing!"
+              exit 1
+            fi
+            
+            # Debug output
+            echo "EC2 Instances IPs Found:"
+            cat ec2-ips.txt
+            
+            # Add instances to known_hosts
             while IFS= read -r IP; do
+              echo "Adding $IP to known_hosts"
               ssh-keyscan -H $IP >> ~/.ssh/known_hosts
             done < ec2-ips.txt
+        
         
 
       - name: Deploy to EC2 Instances
