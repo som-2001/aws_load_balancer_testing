@@ -84,7 +84,7 @@ jobs:
         
             # Debug if ec2-ips.txt exists and is not empty
             if [[ ! -s ec2-ips.txt ]]; then
-              echo "❌ Error: ec2-ips.txt is empty or missing!"
+              echo "❌ Error: ec2-ips.txt is empty or missing!" 
               exit 1
             fi
         
