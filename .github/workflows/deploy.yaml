@@ -67,7 +67,7 @@ jobs:
 
       - name: Setup SSH Key
         run: |
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" | tr -d '\r' > pingMe.pem
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" | awk '{print $0"\r"}' | tr -d '\r' > pingMe.pem
           chmod 600 pingMe.pem
 
       - name: Ensure .ssh Directory & Debug EC2 IPs
