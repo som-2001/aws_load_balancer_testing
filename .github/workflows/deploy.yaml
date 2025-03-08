@@ -3,7 +3,7 @@ name: Deploy to EC2 ASG
 on:
   push:
     branches:
-      - master  # Trigger on push to main branch
+      - master  # Trigger on push to master branch
 
 jobs:
   deploy:
@@ -30,7 +30,13 @@ jobs:
           INSTANCES=$(aws autoscaling describe-auto-scaling-groups \
             --auto-scaling-group-names "${{ secrets.ASG_NAME }}" \
             --query "AutoScalingGroups[0].Instances[*].InstanceId" \
-            --output text)
+            --output text | tr '\n' ' ')
+
+          if [[ -z "$INSTANCES" ]]; then
+            echo "No instances found in ASG. Exiting."
+            exit 1
+          fi
+
           echo "INSTANCES=${INSTANCES}" >> $GITHUB_ENV
 
       - name: Get Public IPs of Instances
@@ -46,16 +52,36 @@ jobs:
             fi
 
             echo "Deploying to $IP"
-            
-            # SSH and deploy
+            echo "$IP" >> ec2-ips.txt
+          done
+
+      - name: Setup SSH Key
+        run: |
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > pingMe.pem
+          chmod 600 pingMe.pem
+
+      - name: Add EC2 Host to Known Hosts
+        run: |
+          while IFS= read -r IP; do
+            ssh-keyscan -H $IP >> ~/.ssh/known_hosts
+          done < ec2-ips.txt
+
+      - name: Deploy to EC2 Instances
+        run: |
+          while IFS= read -r IP; do
+            echo "Deploying to $IP"
+
             ssh -o StrictHostKeyChecking=no -i pingMe.pem ubuntu@$IP <<EOF
               cd /home/ubuntu/aws_load_balancer_testing
-              git pull origin main
+              git pull origin master
               npm install
-              pm2 restart node_backend
+              pm2 delete node_backend || true
+              pm2 start index.js --name node_backend
+              pm2 save
             EOF
-          done
+
+          done < ec2-ips.txt
 
       - name: Cleanup SSH Key
         if: always()
-        run: rm -f pingMe.pem
+        run: rm -f pingMe.pem ec2-ips.txt
