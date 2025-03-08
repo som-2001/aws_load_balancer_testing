@@ -3,7 +3,7 @@ name: Deploy to EC2 ASG
 on:
   push:
     branches:
-      - master
+      - master  # Trigger on push to master branch
 
 jobs:
   deploy:
@@ -13,6 +13,20 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v3
 
+      - name: Ensure AWS CLI is Installed and Updated
+        run: |
+          if aws --version; then
+            echo "AWS CLI is already installed. Updating..."
+            sudo /usr/local/aws-cli/v2/current/bin/aws --version || echo "Already latest version"
+          else
+            echo "Installing AWS CLI..."
+            curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+            unzip awscliv2.zip
+            sudo ./aws/install --update
+          fi
+          aws --version
+      
+       
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v2
         with:
@@ -20,38 +34,103 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Get Public IPs of Running ASG Instances
+      - name: Get Running ASG Instances
+        id: get_instances
         run: |
-          aws autoscaling describe-auto-scaling-groups \
+          INSTANCES=$(aws autoscaling describe-auto-scaling-groups \
             --auto-scaling-group-names "${{ secrets.ASG_NAME }}" \
             --query "AutoScalingGroups[0].Instances[*].InstanceId" \
-            --output text | tr '\n' ' ' > instance_ids.txt
+            --output text | tr '\n' ' ')
 
-          for instance in $(cat instance_ids.txt); do
+          if [[ -z "$INSTANCES" ]]; then
+            echo "No instances found in ASG. Exiting."
+            exit 1
+          fi
+
+          echo "INSTANCES=${INSTANCES}" >> $GITHUB_ENV
+
+      - name: Get Public IPs of Instances
+        run: |
+          for instance in $INSTANCES; do
             IP=$(aws ec2 describe-instances --instance-ids $instance \
               --query "Reservations[0].Instances[0].PublicIpAddress" \
               --output text)
-            [[ "$IP" != "None" ]] && echo "$IP" >> ec2-ips.txt
+
+            if [[ "$IP" == "None" ]]; then
+              echo "Skipping instance $instance as it has no public IP."
+              continue
+            fi
+
+            echo "Deploying to $IP"
+            echo "$IP" >> ec2-ips.txt
           done
 
       - name: Setup SSH Key
         run: |
-          echo "${{ secrets.EC2_SSH_KEY }}" | tr -d '\r' > pingMe.pem
+          echo "${{ secrets.EC2_SSH_KEY }}" | awk '{print $0"\r"}' | tr -d '\r' > pingMe.pem
           chmod 600 pingMe.pem
 
+      - name: Ensure .ssh Directory & Debug EC2 IPs
+        run: |
+            set -e  # Exit immediately if any command fails
+        
+            # Ensure .ssh directory exists and set correct permissions
+            mkdir -p ~/.ssh
+            chmod 700 ~/.ssh
+        
+            # Ensure known_hosts file exists and set correct permissions
+            touch ~/.ssh/known_hosts
+            chmod 600 ~/.ssh/known_hosts
+        
+            # Debug if ec2-ips.txt exists and is not empty
+            if [[ ! -s ec2-ips.txt ]]; then
+              echo "❌ Error: ec2-ips.txt is empty or missing!" 
+              exit 1
+            fi
+        
+            echo "✅ EC2 Instances IPs Found:"
+            cat ec2-ips.txt
+        
+            # Add instances to known_hosts with better error handling
+            while IFS= read -r IP || [[ -n "$IP" ]]; do
+              IP=$(echo "$IP" | tr -d '[:space:]')  # Trim spaces/newlines
+              if [[ -z "$IP" ]]; then
+                continue
+              fi
+        
+              echo "🔹 Adding $IP to known_hosts..."
+              ssh-keyscan -H "$IP" >> ~/.ssh/known_hosts 2>/dev/null || {
+                echo "❌ Error: ssh-keyscan failed for $IP"
+                exit 1
+              }
+            done < ec2-ips.txt
+        
+            echo "✅ All IPs added successfully!"
+            ls -la ~/.ssh  # Debug permissions
+        
       - name: Deploy to EC2 Instances
         run: |
-          while IFS= read -r IP; do
-            echo "🚀 Deploying to $IP"
-            ssh -o StrictHostKeyChecking=no -i pingMe.pem ubuntu@$IP <<EOF
-              cd /home/ubuntu/aws_load_balancer_testing
-              git pull origin master
-              npm install
-              pm2 restart node_backend || pm2 start index.js --name node_backend
-              pm2 save
-            EOF
-          done < ec2-ips.txt
+              while IFS= read -r IP; do
+                echo "🚀 Deploying to $IP"
+                
+                ssh -o StrictHostKeyChecking=no -i pingMe.pem ubuntu@$IP << 'EOF'
+                cd /home/ubuntu/aws_load_balancer_testing
+                git pull origin master
+                npm install
+                pm2 delete node_backend || true
+                pm2 start index.js --name node_backend
+                pm2 save
+              EOF
+          
+              done < ec2-ips.txt
+        shell: bash  # ✅ Correct way to define shell
+        env:
+            AWS_DEFAULT_REGION: ${{ secrets.AWS_REGION }}
+            AWS_REGION: ${{ secrets.AWS_REGION }}
+            AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+            AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          
 
       - name: Cleanup SSH Key
         if: always()
-        run: rm -f pingMe.pem ec2-ips.txt instance_ids.txt
+        run: rm -f pingMe.pem ec2-ips.txt
