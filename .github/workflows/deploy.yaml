@@ -108,24 +108,22 @@ jobs:
             echo "✅ All IPs added successfully!"
             ls -la ~/.ssh  # Debug permissions
         
-        
-        
-
       - name: Deploy to EC2 Instances
         run: |
           while IFS= read -r IP; do
             echo "Deploying to $IP"
 
-            ssh -o StrictHostKeyChecking=no -i pingMe.pem ubuntu@$IP <<EOF
-              cd /home/ubuntu/aws_load_balancer_testing
-              git pull origin master
-              npm install
-              pm2 delete node_backend || true
-              pm2 start index.js --name node_backend
-              pm2 save
+            ssh -o StrictHostKeyChecking=no -i pingMe.pem ubuntu@$IP << 'EOF'
+            cd /home/ubuntu/aws_load_balancer_testing
+            git pull origin master
+            npm install
+            pm2 delete node_backend || true
+            pm2 start index.js --name node_backend
+            pm2 save
             EOF
 
           done < ec2-ips.txt
+        shell: /usr/bin/bash
 
       - name: Cleanup SSH Key
         if: always()
