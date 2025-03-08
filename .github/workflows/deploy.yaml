@@ -43,7 +43,7 @@ jobs:
         run: |
           while IFS= read -r IP; do
             echo "🚀 Deploying to $IP"
-            ssh -o StrictHostKeyChecking=no -i pingMe.pem ubuntu@$IP << 'EOF'
+            ssh -o StrictHostKeyChecking=no -i pingMe.pem ubuntu@$IP <<EOF
               cd /home/ubuntu/aws_load_balancer_testing
               git pull origin master
               npm install
